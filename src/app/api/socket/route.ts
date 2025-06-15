@@ -17,7 +17,7 @@ export async function GET() {
   return NextResponse.json({
     message: "Socket.IO server is running separately on port 3001",
     status: "Socket.IO should be started with: npm run socket",
-    endpoint: "http://localhost:3001",
+    endpoint: process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001",
   });
 }
 
@@ -25,7 +25,7 @@ export async function POST() {
   return NextResponse.json({
     message: "Socket.IO server is running separately on port 3001",
     status: "Socket.IO should be started with: npm run socket",
-    endpoint: "http://localhost:3001",
+    endpoint: process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001",
   });
 }
 

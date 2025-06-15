@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "socket": "node ./src/server/socket-server.js",
+    "socket": "nodemon ./src/server/socket-server.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -53,6 +53,7 @@
     "mongoose": "^8.15.1",
     "next": "15.3.3",
     "next-themes": "^0.4.6",
+    "nodemon": "^3.1.10",
     "postcss": "^8.5.4",
     "react": "^19.0.0",
     "react-day-picker": "^9.7.0",

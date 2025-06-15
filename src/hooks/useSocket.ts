@@ -45,7 +45,7 @@ export function useSocket(): UseSocketReturn {
 
     console.log("Connecting to Socket.IO server...");
 
-    const newSocket = io("http://localhost:3001", {
+    const newSocket = io(process.env.NEXT_PUBLIC_SOCKET_URL, {
       auth: { token },
       transports: ["websocket", "polling"],
       forceNew: true,

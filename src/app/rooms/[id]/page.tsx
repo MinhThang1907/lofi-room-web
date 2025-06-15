@@ -3,21 +3,14 @@
 import type React from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
-  Music,
   Users,
   MessageCircle,
   Mic,
   MicOff,
-  Volume2,
-  VolumeX,
-  Play,
-  Pause,
-  SkipForward,
   ArrowLeft,
   Send,
   Settings,
@@ -31,6 +24,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/hooks/useSocket";
 import { fetchRoom } from "@/lib/api";
 import { useChatScroll } from "@/hooks/useChatScroll";
+import { MusicPlayer } from "@/components/music-player";
+import { MusicLibrary } from "@/components/music-library";
 
 interface User {
   id: string;
@@ -47,6 +42,16 @@ interface Message {
   userName: string;
   content: string;
   timestamp: string;
+}
+
+interface Track {
+  id: string;
+  title: string;
+  artist: string;
+  url: string;
+  duration: number;
+  genre: string;
+  cover?: string;
 }
 
 interface RoomData {
@@ -86,23 +91,30 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isMuted, setIsMuted] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [volume, setVolume] = useState(70);
-  const [currentTrack, setCurrentTrack] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [trackDetails, setTrackDetails] = useState<Record<string, Track>>({});
+
+  // Music player state
+  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
+  const [playlist, setPlaylist] = useState<Track[]>([]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [volume, setVolume] = useState(70);
+  const [showPlaylist, setShowPlaylist] = useState(false);
+  const [showMusicLibrary, setShowMusicLibrary] = useState(false);
+
   const hasJoinedRoom = useRef(false);
   const {
     chatContainerRef,
     messagesEndRef,
     hasNewMessage,
-    isUserAtBottom,
-    scrollToBottom,
     handleNewMessageClick,
   } = useChatScroll({
     messages,
     currentUserId: user?.id,
   });
+
+  const isOwner = room?.owner.id === user?.id;
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -112,6 +124,8 @@ export default function RoomPage() {
 
     if (user && params.id) {
       loadRoomData();
+      loadPlaylist();
+      fetchTracks();
     }
   }, [user, authLoading, params.id, router]);
 
@@ -127,14 +141,20 @@ export default function RoomPage() {
       const handleRoomJoined = (data: any) => {
         console.log("Room joined event:", data);
         setRoomUsers(data.users || []);
-        setCurrentTrack(data.currentTrack);
+        if (data.currentTrack && data.currentTrack !== "No music playing") {
+          // Find track in playlist
+          const track = playlist.find((t) => t.title === data.currentTrack);
+          if (track) {
+            console.log("Setting current track:", track);
+            setCurrentTrack(track);
+          }
+        }
         setIsPlaying(data.isPlaying);
       };
 
       const handleUserJoined = (data: any) => {
         console.log("User joined event:", data.user);
         setRoomUsers((prev) => {
-          // Check if user already exists
           const exists = prev.some((u) => u.id === data.user.id);
           if (exists) return prev;
           return [...prev, data.user];
@@ -149,7 +169,6 @@ export default function RoomPage() {
       const handleNewMessage = (message: any) => {
         console.log("New message event:", message);
         setMessages((prev) => {
-          // Check if message already exists
           const exists = prev.some((m) => m.id === message.id);
           if (exists) return prev;
           return [...prev, message];
@@ -174,8 +193,14 @@ export default function RoomPage() {
         );
       };
 
-      const handleMusicStateChanged = (data: any) => {
-        setCurrentTrack(data.currentTrack);
+      const handleMusicStateChanged = async (data: any) => {
+        console.log("Music state changed:", data);
+        if (data.currentTrack && data.currentTrack !== "No music playing") {
+          const track = trackDetails[data.currentTrack];
+          if (track) {
+            setCurrentTrack(track);
+          }
+        }
         setIsPlaying(data.isPlaying);
       };
 
@@ -195,7 +220,6 @@ export default function RoomPage() {
       socket.on("error", handleError);
 
       return () => {
-        // Clean up socket listeners
         socket.off("room-joined", handleRoomJoined);
         socket.off("user-joined", handleUserJoined);
         socket.off("user-left", handleUserLeft);
@@ -209,40 +233,7 @@ export default function RoomPage() {
         leaveRoom();
       };
     }
-  }, [socket, room, isConnected, joinRoom, leaveRoom]);
-
-  // Thêm useEffect để theo dõi scroll position
-
-  // Cập nhật useEffect cho messages
-  useEffect(() => {
-    if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-
-      // Nếu tin nhắn mới không phải của user hiện tại và user không ở cuối
-      if (lastMessage.userId !== user?.id && !isUserAtBottom) {
-        // setHasNewMessage(true)
-      } else {
-        // Auto scroll nếu là tin nhắn của user hoặc user đang ở cuối
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({
-            behavior: "smooth",
-            block: "end",
-            inline: "nearest",
-          });
-        }, 100);
-      }
-    }
-  }, [messages, user?.id, isUserAtBottom]);
-
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-        inline: "nearest",
-      });
-    }
-  }, [messages]);
+  }, [socket, room, isConnected, joinRoom, leaveRoom, playlist]);
 
   const loadRoomData = async () => {
     try {
@@ -250,7 +241,6 @@ export default function RoomPage() {
       const data = await fetchRoom(params.id as string);
       setRoom(data.room);
       setMessages(data.messages || []);
-      setCurrentTrack(data.room.currentTrack || "No music playing");
     } catch (error) {
       console.error("Error loading room:", error);
       setError("Không thể tải thông tin phòng");
@@ -259,12 +249,44 @@ export default function RoomPage() {
     }
   };
 
+  const loadPlaylist = async () => {
+    try {
+      const response = await fetch(`/api/rooms/${params.id}/playlist`);
+      const data = await response.json();
+      console.log("Loaded playlist:", data);
+      setPlaylist(data.playlist || []);
+
+      // Set current track if exists
+      // if (data.playlist && data.playlist.length > 0) {
+      //   setCurrentTrack(data.playlist[0]);
+      // }
+    } catch (error) {
+      console.error("Error loading playlist:", error);
+    }
+  };
+
+  const fetchTracks = async () => {
+    try {
+      const response = await fetch(`/api/music/tracks`);
+      if (!response.ok) throw new Error("Failed to fetch tracks");
+      const data: any = await response.json();
+      const trackMap: any = {};
+      await Promise.all(
+        data.tracks.map((track: any) => {
+          trackMap[track.title] = track;
+        })
+      );
+      setTrackDetails(trackMap);
+    } catch (error) {
+      console.error("Error fetching track details:", error);
+    }
+  };
+
   const handleSendMessage = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!newMessage.trim() || !room || !isConnected) return;
 
-      console.log("Sending message via socket:", newMessage);
       sendMessage(room.id, newMessage);
       setNewMessage("");
     },
@@ -288,19 +310,79 @@ export default function RoomPage() {
           y: event.clientY - rect.top,
         };
 
-        // Update local state immediately for better UX
         setRoomUsers((prev) =>
           prev.map((u) =>
             u.id === user.id ? { ...u, position: newPosition } : u
           )
         );
-
-        // Send to server
         moveUser(room.id, newPosition);
       }
     },
     [user, room, isConnected, moveUser]
   );
+
+  // Music player handlers
+  const handlePlay = () => {
+    if (socket && room && currentTrack) {
+      socket.emit("music-control", { roomId: room.id, action: "play" });
+    }
+  };
+
+  const handlePause = () => {
+    if (socket && room) {
+      socket.emit("music-control", { roomId: room.id, action: "pause" });
+    }
+  };
+
+  const handleNext = () => {
+    if (socket && room && playlist.length > 0) {
+      const currentIndex = playlist.findIndex((t) => t.id === currentTrack?.id);
+      const nextIndex = (currentIndex + 1) % playlist.length;
+      const nextTrack = playlist[nextIndex];
+
+      setCurrentTrack(nextTrack);
+
+      socket.emit("music-control", {
+        roomId: room.id,
+        action: "next",
+        trackId: nextTrack.title,
+      });
+    }
+  };
+
+  const handlePrevious = () => {
+    if (socket && room && playlist.length > 0) {
+      const currentIndex = playlist.findIndex((t) => t.id === currentTrack?.id);
+      const prevIndex =
+        currentIndex > 0 ? currentIndex - 1 : playlist.length - 1;
+      const prevTrack = playlist[prevIndex];
+
+      setCurrentTrack(prevTrack);
+
+      socket.emit("music-control", {
+        roomId: room.id,
+        action: "next",
+        trackId: prevTrack.title,
+      });
+    }
+  };
+
+  const handleTrackSelect = async (track: Track) => {
+    if (socket && room) {
+      socket.emit("music-control", {
+        roomId: room.id,
+        action: "next",
+        trackId: track.title,
+      });
+
+      setShowMusicLibrary(false);
+    }
+  };
+
+  const handleAddToPlaylist = (trackId: string) => {
+    // Reload playlist after adding
+    loadPlaylist();
+  };
 
   if (authLoading || loading) {
     return (
@@ -368,9 +450,20 @@ export default function RoomPage() {
             </div>
           </div>
 
-          <Button variant="ghost" size="sm">
-            <Settings className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center space-x-2">
+            {isOwner && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowMusicLibrary(!showMusicLibrary)}
+              >
+                Thư viện nhạc
+              </Button>
+            )}
+            <Button variant="ghost" size="sm">
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -436,54 +529,47 @@ export default function RoomPage() {
 
           {/* Music Player */}
           <div className="absolute bottom-4 left-4 right-4">
-            <Card className="bg-white/90 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-4">
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setIsPlaying(!isPlaying)}
-                    >
-                      {isPlaying ? (
-                        <Pause className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button size="sm" variant="ghost">
-                      <SkipForward className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <Music className="h-4 w-4 text-purple-600" />
-                      <span className="font-medium">{currentTrack}</span>
-                    </div>
-                    <div className="mt-1 bg-gray-200 rounded-full h-1">
-                      <div className="bg-purple-600 h-1 rounded-full w-1/3"></div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setVolume(volume > 0 ? 0 : 70)}
-                    >
-                      {volume > 0 ? (
-                        <Volume2 className="h-4 w-4" />
-                      ) : (
-                        <VolumeX className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <span className="text-sm text-gray-600 w-8">{volume}%</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <MusicPlayer
+              roomId={room.id}
+              currentTrack={currentTrack}
+              playlist={playlist}
+              isPlaying={isPlaying}
+              setIsPlaying={setIsPlaying}
+              volume={volume}
+              isOwner={isOwner}
+              onPlay={handlePlay}
+              onPause={handlePause}
+              onNext={handleNext}
+              onPrevious={handlePrevious}
+              onVolumeChange={setVolume}
+              onTrackSelect={handleTrackSelect}
+              onPlaylistToggle={() => setShowPlaylist(!showPlaylist)}
+              onAddToPlaylist={handleAddToPlaylist}
+              showPlaylist={showPlaylist}
+            />
           </div>
+
+          {/* Music Library Overlay */}
+          {showMusicLibrary && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="w-full max-w-4xl mx-4">
+                <div className="flex justify-end mb-4">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowMusicLibrary(false)}
+                  >
+                    Đóng
+                  </Button>
+                </div>
+                <MusicLibrary
+                  roomId={room.id}
+                  onTrackSelect={handleTrackSelect}
+                  onAddToPlaylist={handleAddToPlaylist}
+                  isOwner={isOwner}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Chat Sidebar */}
@@ -524,7 +610,7 @@ export default function RoomPage() {
               </div>
             ) : (
               <>
-                {messages.map((message, index) => (
+                {messages.map((message) => (
                   <div
                     key={message.id}
                     className={`flex space-x-2 message-enter ${
@@ -578,6 +664,7 @@ export default function RoomPage() {
                 <div ref={messagesEndRef} className="h-1" />
               </>
             )}
+
             {/* New message indicator */}
             {hasNewMessage && (
               <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10">
